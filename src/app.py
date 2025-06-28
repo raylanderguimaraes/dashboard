@@ -13,7 +13,7 @@ path = r"C:\Users\rgramos\pos_mineracao\dashboard\src\data\dados_completos_es.ge
 path_gpkg = r"C:\Users\rgramos\pos_mineracao\dashboard\src\data\dados_completos_es.gpkg"
 
 st.markdown("""
-<div style='text-align: center; font-size: 20px;  font-weight: bold; margin-bottom: 1rem'>
+<div style='text-align: center; font-size: 25px;  font-weight: bold; margin-bottom: 1rem'>
 📊 Painel de Desempenho Escolar
 </div>
 """, unsafe_allow_html=True)
@@ -53,9 +53,14 @@ def open_df(path):
     return gpd.read_file(path)
 
 
-df = open_df(path_gpkg)
+@st.cache_data
+def simplify_df(_df):
+    df_copy = _df.copy()
+    df_copy['geometry'] = df_copy['geometry'].simplify(tolerance=0.01, preserve_topology=True)
+    return df_copy
 
-df = df[features]
+df = open_df(path_gpkg)
+df = simplify_df(df)
 
 total_schools = df.shape[0]
 total_cities = df['nm_mun'].nunique()
@@ -104,10 +109,7 @@ data_sources = {
     }
 }
 
-total_alunos =300
-
-
-#Container dos menus
+# Gráfico de barras Superintendências
 with st.container():
     col1, col2 = st.columns([3,1])
     with col1:
@@ -126,11 +128,7 @@ with st.container():
        
 
 
-
-
-
-#Parte que controla o gráfico de barras
-# Função genérica
+# Função genérica prara gerar gráfico de barras
 def handle_plot_bar_chart(tab_name, tab):
     with tab:
         st.subheader(f"Gráfico - {tab_name}")
@@ -139,57 +137,30 @@ def handle_plot_bar_chart(tab_name, tab):
             st.bar_chart(df, use_container_width=True)
         else:
             st.warning("Dados não disponíveis para esta combinação.")
-       
-option = st.selectbox(
-            " ",
-            ['Percentual de Aprovação', 'Percentual de reprovação', 'Percentual de Abandono'],
-            index=0,
-            accept_new_options=True,
-            )
+
+with st.container():
+    col1, col2, col3 = st.columns([1,2,1])
+    with col1:
+        st.text("")
+    with col2:
+        option = st.selectbox(
+                    " ",
+                    ['Percentual de Aprovação', 'Percentual de reprovação', 'Percentual de Abandono'],
+                    index=0,
+                    accept_new_options=True,
+                    )
+    with col3:
+        st.text("")
+
 tab1, tab2, tab3 = st.tabs(['Por município', 'Por dependência', 'Por localização'])
 handle_plot_bar_chart("Por município", tab1)
 handle_plot_bar_chart("Por dependência", tab2)
 handle_plot_bar_chart("Por localização", tab3)
 
 
-          
-
-#Plotagem do mapa do ES
-
-# def plot_map(gdf, coluna, titulo, cmap="viridis"):
-#     fig, ax = plt.subplots(figsize=(10, 8))
-#     gdf.plot(
-#         column=coluna,
-#         cmap=cmap,
-#         legend=True,
-#         edgecolor='black',
-#         legend_kwds={'label': "Percentual (%)"},
-#         ax=ax
-#     )
-#     ax.set_title(titulo, fontsize=14)
-#     ax.axis('off')
-#     st.pyplot(fig)
-
-
-# with st.container():
-#     col1, col2 = st.columns(2)
-
-#     with col1:
-#         st.subheader("Visualização no Mapa")
         
-#         tab1, tab2, tab3 = st.tabs(['Percentual Aprovados', 'Percentual Reprovados', 'Percentual Abandono'])
 
-#         with tab1:
-#             plot_map(gdf=results_df, coluna="perc_aprovados", titulo="Percentual de Aprovados por Município")
-
-#         with tab2:
-#             plot_map(gdf=results_df, coluna="perc_reprovados", titulo="Percentual de Reprovados por Município", cmap="OrRd")
-
-#         with tab3:
-#             plot_map(gdf=results_df, coluna="perc_abandono", titulo="Percentual de Abandono por Município", cmap="Reds")
-
-
-
+# Mapa interativo utilizando Folium
 def generate_colors(n):
     cmap = plt.get_cmap('tab10')
     return [mcolors.rgb2hex(cmap(i % 10)) for i in range(n)]
@@ -215,42 +186,58 @@ def plot_gauge(title, value, color):
     return fig
 
 
+
+
 def generate_folium_map(gdf, selected_sre=None):
     m = folium.Map(location=[-19.5, -40.7], zoom_start=7, tiles='cartodbpositron')
-    unique_sres = gdf['sre'].unique()
-    colors = generate_colors(len(unique_sres))
-    color_map = dict(zip(unique_sres, colors))
+    
+    def style_function(feature):
+        sre_name = feature['properties']['sre']
+        is_selected = sre_name == selected_sre
+        color = '#ff0000' if is_selected else '#3186cc'
+        return {
+            'fillColor': color,
+            'color': 'black',
+            'weight': 3 if is_selected else 1,
+            'fillOpacity': 0.9 if is_selected else 0.6,
+        }
 
-    for idx, row in gdf.iterrows():
-        sre_name = row['sre']
-        is_selected = (sre_name == selected_sre)
-
-        folium.GeoJson(
-            row['geometry'],
-            name=sre_name,
-            style_function=lambda feature, color=color_map[sre_name], selected=is_selected: {
-                'fillColor': '#ff0000' if selected else color,
-                'color': 'black',
-                'weight': 3 if selected else 1,
-                'fillOpacity': 0.9 if selected else 0.6,
-            },
-            tooltip=folium.Tooltip(sre_name)
-        ).add_to(m)
+    folium.GeoJson(
+        gdf,
+        style_function=style_function,
+        tooltip=folium.GeoJsonTooltip(fields=["sre", "nm_mun"], aliases=["SRE", "Município"])
+    ).add_to(m)
 
     return m
 
 # === Interface ===
 
-st.title("Painel das SREs")
+# st.subheader("Painel das SREs")
+
+st.markdown("<h4 style='text-align: center; font-size: 25px;' >Painel das SRE's</h4>", unsafe_allow_html=True)
 
 # Sidebar ou topo centralizado com filtro
-selected_sre = st.selectbox("Selecione a SRE:", options=results_df['sre'].unique())
+with st.container():
+    col1, col2, col3 = st.columns([1,2,1])
+    with col1:
+        st.text("")
+    with col2:    
+        selected_sre = st.selectbox("Selecione a SRE:", options=results_df['sre'].unique())
+    with col3:
+        st.text("")
+
 
 # Dados da SRE
-sre_filtered = results_df[results_df['sre'] == selected_sre]
-media_aprov = sre_filtered['perc_aprovados'].mean()
-media_reprov = sre_filtered['perc_reprovados'].mean()
-media_aband = sre_filtered['perc_abandono'].mean()
+@st.cache_data
+def calcule_means_for_sre(results_df, selected_sre):
+    sre_filtered = results_df[results_df['sre'] == selected_sre]
+    media_aprov = sre_filtered['perc_aprovados'].mean()
+    media_reprov = sre_filtered['perc_reprovados'].mean()
+    media_aband = sre_filtered['perc_abandono'].mean()
+    return media_aprov, media_reprov, media_aband
+
+results_without_geom = results_df.drop(columns=['geometry']).copy()
+media_aprov, media_reprov, media_aband = calcule_means_for_sre(results_without_geom, selected_sre)
 
 # Layout com mapa e indicadores
 with st.container():
@@ -267,62 +254,12 @@ with st.container():
         
 
 
-        
-
-# def plot_map_folium(gdf, coluna, titulo, cmap='YlGn'):
-#     # Calcular faixa de valores para color scale
-#     min_val = gdf[coluna].min()
-#     max_val = gdf[coluna].max()
-
-#     # Criar o mapa centralizado no Espírito Santo
-#     m = folium.Map(location=[-19.5, -40.7], zoom_start=7, tiles='cartodbpositron')
-
-#     # Criar colormap (pode ajustar cores conforme o cmap desejado)
-#     colormap = folium.LinearColormap(
-#         colors=['red', 'yellow', 'green'],  # ou usar branca->azul->verde, etc.
-#         vmin=min_val,
-#         vmax=max_val,
-#         caption=titulo
-#     )
-
-#     # Adicionar polígonos
-#     folium.GeoJson(
-#         gdf,
-#         style_function=lambda feature: {
-#             'fillColor': colormap(feature['properties'][coluna]),
-#             'color': 'black',
-#             'weight': 0.5,
-#             'fillOpacity': 0.7,
-#         },
-#         tooltip=folium.GeoJsonTooltip(
-#             fields=['nm_mun', coluna],
-#             aliases=['Município', 'Percentual'],
-#             localize=True
-#         )
-#     ).add_to(m)
-
-#     # Adicionar legenda
-#     colormap.add_to(m)
-
-#     # Exibir no Streamlit
-#     st_folium(m, width=700, height=500)
 
 
 
 
 
-   # st.subheader("Visualização no Mapa (Interativo)")
-        
-        # tab1, tab2, tab3 = st.tabs(['Aprovados', 'Reprovados', 'Abandono'])
 
-        # with tab1:
-        #     plot_map_folium(gdf=results_df, coluna="perc_aprovados", titulo="Percentual de Aprovados")
-
-        # with tab2:
-        #     plot_map_folium(gdf=results_df, coluna="perc_reprovados", titulo="Percentual de Reprovados")
-
-        # with tab3:
-        #     plot_map_folium(gdf=results_df, coluna="perc_abandono", titulo="Percentual de Abandono")
 
 
 
