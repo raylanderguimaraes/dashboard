@@ -1,0 +1,12 @@
+# Ignora ambientes virtuais
+.venv/
+.env/
+*.pyc
+__pycache__/
+src/data
+# Arquivos do sistema
+.DS_Store
+Thumbs.db
+
+# Arquivos de Streamlit
+.streamlit/config.toml
